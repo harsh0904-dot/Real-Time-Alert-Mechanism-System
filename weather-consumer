@@ -1,0 +1,97 @@
+import json
+from kafka import KafkaConsumer
+import psycopg2
+
+# PostgreSQL configuration
+DB_HOST = 'localhost'
+DB_NAME = 'weather_data1'
+DB_USER = 'harsh'
+DB_PASSWORD = 'harsh'
+
+# Create PostgreSQL connection
+try:
+    conn = psycopg2.connect(
+        host=DB_HOST,
+        database=DB_NAME,
+        user=DB_USER,
+        password=DB_PASSWORD,
+        port='5432'
+    )
+    cur = conn.cursor()
+    print("Connected to the database.")
+except psycopg2.Error as e:
+    print(f"Database connection error: {e}")
+    exit(1)
+
+# Kafka Consumer configuration
+try:
+    consumer = KafkaConsumer(
+        'weather-data',
+        bootstrap_servers='localhost:9092',
+        auto_offset_reset='earliest',
+        enable_auto_commit=True,
+        group_id='weather-group',
+        value_deserializer=lambda x: x.decode('utf-8') if x else None
+    )
+    print("Connected to Kafka broker.")
+except Exception as e:
+    print(f"Error connecting to Kafka broker: {e}")
+    exit(1)
+
+def is_valid_json(data):
+    """
+    Validate if the input is a valid JSON string and contains the required keys.
+    """
+    try:
+        parsed_data = json.loads(data)
+        required_keys = {'city', 'timestamp', 'temperature', 'weather'}
+        if isinstance(parsed_data, dict) and required_keys.issubset(parsed_data.keys()):
+            return parsed_data
+    except json.JSONDecodeError:
+        pass
+    return None
+
+if __name__ == "__main__":
+    print("Starting Kafka consumer...")
+    try:
+        for message in consumer:
+            # Debug raw message
+            print(f"Raw message: {message.value}")
+
+            # Skip empty or invalid messages
+            if not message.value:
+                print("Skipping empty message...")
+                continue
+
+            # Validate and parse JSON
+            weather_data = is_valid_json(message.value)
+            if not weather_data:
+                print(f"Invalid JSON message: {message.value}")
+                continue
+
+            print(f"Valid message: {weather_data}")
+
+            # Insert into PostgreSQL
+            try:
+                cur.execute("""
+                    INSERT INTO weather_info (city, timestamp, temperature, weather)
+                    VALUES (%s, %s, %s, %s)
+                """, (
+                    weather_data['city'],
+                    weather_data['timestamp'],
+                    weather_data['temperature'],
+                    weather_data['weather']
+                ))
+                conn.commit()
+                print("Data inserted successfully.")
+            except psycopg2.Error as db_err:
+                print(f"Database error: {db_err}")
+                conn.rollback()
+    except KeyboardInterrupt:
+        print("\nConsumer interrupted. Exiting...")
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+    finally:
+        print("Closing database connection...")
+        cur.close()
+        conn.close()

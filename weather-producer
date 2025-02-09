@@ -1,0 +1,61 @@
+import json
+import time
+import requests
+from kafka import KafkaProducer
+
+# Kafka configuration
+KAFKA_TOPIC = 'weather-data'
+KAFKA_BROKER = 'localhost:9092'  # Change if your broker address is different
+
+# OpenWeatherMap API configuration
+API_KEY = 'b2b7e34216a77579888422b4e36a7c1e'  # Replace with your OpenWeatherMap API key
+BASE_URL = 'http://api.openweathermap.org/data/2.5/weather'
+
+# Create a Kafka producer
+producer = KafkaProducer(
+    bootstrap_servers=KAFKA_BROKER,
+    value_serializer=lambda v: json.dumps(v).encode('utf-8')
+)
+
+def fetch_and_send_weather_data(city):
+    """
+    Fetch weather data for a city and send it to Kafka.
+    """
+    params = {
+        'q': city,
+        'appid': API_KEY,
+        'units': 'metric'  # Use 'imperial' for Fahrenheit
+    }
+    try:
+        response = requests.get(BASE_URL, params=params)
+        if response.status_code == 200:
+            data = response.json()
+            message = {
+                'city': city,
+                'timestamp': time.time(),
+                'temperature': data['main']['temp'],
+                'weather': data['weather'][0]['description']
+            }
+            producer.send(KAFKA_TOPIC, value=message)
+            print(f"Sent: {message}")
+        else:
+            print(f"Failed to fetch data for {city}: HTTP {response.status_code}")
+    except Exception as e:
+        print(f"Error fetching data for {city}: {e}")
+
+# List of cities to fetch weather data for
+cities = [
+    'London', 'New York', 'Tokyo', 'Berlin', 'Sydney', 'Paris', 'Dubai', 'Mumbai', 
+    'Beijing', 'Moscow', 'Cape Town', 'Buenos Aires', 'Cairo', 'Singapore', 'Los Angeles',
+    'Toronto', 'Mexico City', 'Jakarta', 'Istanbul', 'Rome', 'Bangkok', 'Seoul', 'Sao Paulo',
+    'Nairobi', 'Melbourne', 'Vancouver', 'Madrid', 'Johannesburg', 'Lagos', 'Rio de Janeiro',
+    'Kuala Lumpur', 'Chicago', 'Hanoi', 'Baghdad', 'Karachi', 'Lisbon', 'Tehran', 'Casablanca',
+    'Athens', 'Warsaw', 'Hong Kong', 'Manila', 'Zurich', 'Lima', 'Stockholm', 'Dublin', 
+    'Bogota', 'Brisbane', 'Vienna', 'Oslo', 'Kabul', 'Doha', 'Prague', 'Accra'
+]
+
+if __name__ == "__main__":
+    while True:
+        for city in cities:
+            fetch_and_send_weather_data(city)
+        time.sleep(60)  # Sleep for a minute before fetching data again for all cities
